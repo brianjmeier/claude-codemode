@@ -5,24 +5,17 @@ writes a JavaScript program, the program calls Claude Code's own tools
 (`Read`, `Bash`, `Edit`, MCP tools — anything the session has), and only the
 program's return value comes back into the conversation.
 
-```js
-const listed = await tools.Bash({ command: "rg --files -g '*.ts' src" })
-const rows = []
-for (const file of listed.result.stdout.split("\n").filter(Boolean)) {
-  const { result } = await tools.Read({ file_path: file })
-  const todos = result.file.content.split("\n").filter(l => l.includes("TODO")).length
-  if (todos > 0) rows.push({ file, todos })
-}
-return rows.sort((a, b) => b.todos - a.todos).slice(0, 10)
-```
+![Claude Code summarizing a week of commits with one codemode program, then a deny rule stopping a call inside a program](docs/demo.svg)
 
-Thirty reads, one result in context:
+- **0:00** Start Claude Code with the mod loaded
+- **0:09** Ask for this week's commits, boiled down to a short summary
+- **0:28** Claude writes one program; its tool calls run inside it
+- **0:37** Only the summary comes back
+- **0:42** Ask it to try `jj log`, which the settings deny
+- **0:55** The deny rule stops the call inside the program, which catches `ToolDenied`
 
-```
-[{"file":"src/a.ts","todos":4},...]
-
-tool calls: Bash, Read ×30
-```
+Recorded in a real terminal (Claude Code 2.1.299, Opus 5.5), idle time trimmed
+to 2.5 s. To play it with controls: `asciinema play docs/demo.cast`.
 
 It ships with a `codemode` skill that tells the model when a program beats
 direct calls and how to write one.
