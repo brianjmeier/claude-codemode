@@ -7,16 +7,6 @@ program's return value comes back into the conversation.
 
 ![Claude Code summarizing a week of commits with one codemode program, then a deny rule stopping a call inside a program](docs/demo.svg)
 
-- **0:00** Start Claude Code with the mod loaded
-- **0:09** Ask for this week's commits, boiled down to a short summary
-- **0:28** Claude writes one program; its tool calls run inside it
-- **0:37** Only the summary comes back
-- **0:42** Ask it to try `jj log`, which the settings deny
-- **0:55** The deny rule stops the call inside the program, which catches `ToolDenied`
-
-Recorded in a real terminal (Claude Code 2.1.299, Opus 5.5), idle time trimmed
-to 2.5 s. To play it with controls: `asciinema play docs/demo.cast`.
-
 It ships with a `codemode` skill that tells the model when a program beats
 direct calls and how to write one.
 
@@ -50,12 +40,6 @@ Or for one session: `claude --plugin-dir <this folder>`.
 - **Limits.** A synchronous infinite loop cannot be preempted. The program
   shares the runtime's built-in prototypes, so it can monkey-patch `Array.prototype`
   for this mod's runtime (not the session, not the filesystem).
-
-## Why not gabe4coding/claude-code-mode
-
-That plugin is MCP-only and adds tool search, hints, saved functions and
-output projection. This one is the primitive alone, and reaches built-in tools
-because a mod can call them through the engine.
 
 ## Develop
 

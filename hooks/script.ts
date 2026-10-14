@@ -1,21 +1,15 @@
 import Sval from './vendor/sval.js'
+import type { NestedCall, Run } from '../types'
 
 type ToolAnswer = { text: string; result: unknown; isError: boolean }
 
+export type HostAnswer = { kind: 'denied'; reason: string } | ({ kind: 'answered' } & ToolAnswer)
+
 export type ToolHost = {
-  call: (tool: string, args: Record<string, unknown>) => Promise<ToolAnswer>
+  call: (tool: string, args: Record<string, unknown>) => Promise<HostAnswer>
   list: () => Promise<readonly { name: string; description: string }[]>
-}
-
-type Trace = { logs: readonly string[]; calls: readonly string[] }
-
-export class ScriptFailed extends Error {
-  constructor(
-    readonly reason: string,
-    readonly trace: Trace,
-  ) {
-    super(reason)
-  }
+  now: () => Promise<number>
+  publish: (run: Run) => Promise<void>
 }
 
 export class ToolDenied extends Error {
@@ -28,32 +22,62 @@ export class ToolDenied extends Error {
   }
 }
 
+const SUMMARY_KEYS = ['command', 'file_path', 'pattern', 'path', 'url', 'query', 'description']
+const SUMMARY_LENGTH = 120
+
+const summaryOf = (args: Record<string, unknown>): string => {
+  const key = SUMMARY_KEYS.find(name => typeof args[name] === 'string')
+  const text = key === undefined ? JSON.stringify(args) : String(args[key])
+  return text.replace(/\s+/g, ' ').trim().slice(0, SUMMARY_LENGTH)
+}
+
 const describe = (value: unknown): string =>
   typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value))
 
-const counted = (calls: readonly string[]): string => {
+const counted = (calls: readonly NestedCall[]): string => {
   const counts = new Map<string, number>()
-  for (const call of calls) counts.set(call, (counts.get(call) ?? 0) + 1)
+  for (const { tool } of calls) counts.set(tool, (counts.get(tool) ?? 0) + 1)
   return [...counts].map(([name, n]) => (n === 1 ? name : `${name} ×${n}`)).join(', ')
 }
 
-export const report = (head: string, trace: Trace): string =>
+const headOf = (run: Run): string => {
+  if (run.outcome.kind === 'returned') return run.outcome.text
+  if (run.outcome.kind === 'failed') return `The program failed: ${run.outcome.reason}`
+  return '(still running)'
+}
+
+export const report = (run: Run): string =>
   [
-    head,
-    trace.logs.length === 0 ? '' : `log:\n${trace.logs.join('\n')}`,
-    trace.calls.length === 0 ? '' : `tool calls: ${counted(trace.calls)}`,
+    headOf(run),
+    run.logs.length === 0 ? '' : `log:\n${run.logs.join('\n')}`,
+    run.calls.length === 0 ? '' : `tool calls: ${counted(run.calls)}`,
   ]
     .filter(part => part !== '')
     .join('\n\n')
 
-export async function runScript(code: string, host: ToolHost): Promise<string> {
-  const logs: string[] = []
-  const calls: string[] = []
-  const trace = { logs, calls }
+export async function runScript(code: string, host: ToolHost): Promise<Run> {
+  const startedAt = await host.now()
+  let run: Run = { calls: [], logs: [], outcome: { kind: 'running' }, elapsedMs: null }
+  const change = (next: Run) => {
+    run = next
+    return host.publish(run)
+  }
+  const settle = (index: number, call: NestedCall) =>
+    change({ ...run, calls: run.calls.map((one, i) => (i === index ? call : one)) })
 
-  const tool = (name: string, args: Record<string, unknown>) => {
-    calls.push(name)
-    return host.call(name, args)
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const summary = summaryOf(args)
+    const index = run.calls.length
+    const callStartedAt = await host.now()
+    await change({ ...run, calls: [...run.calls, { tool: name, summary, status: 'running' }] })
+    const answer = await host.call(name, args)
+    if (answer.kind === 'denied') {
+      await settle(index, { tool: name, summary, status: 'denied' })
+      throw new ToolDenied(name, answer.reason)
+    }
+    const ms = (await host.now()) - callStartedAt
+    await settle(index, { tool: name, summary, status: answer.isError ? 'failed' : 'done', ms })
+    return { text: answer.text, result: answer.result, isError: answer.isError }
   }
   const tools = new Proxy(
     {},
@@ -65,16 +89,18 @@ export async function runScript(code: string, host: ToolHost): Promise<string> {
     tool,
     tools,
     listTools: host.list,
-    log: (...parts: unknown[]) => void logs.push(parts.map(describe).join(' ')),
+    log: (...parts: unknown[]) => void change({ ...run, logs: [...run.logs, parts.map(describe).join(' ')] }),
     ToolDenied,
   })
 
+  let outcome: Run['outcome']
   try {
     interpreter.run(`exports.run = (async () => {\n${code}\n})()`)
     const value: unknown = await (interpreter.exports as { run: Promise<unknown> }).run
-    return report(value === undefined ? '(no value returned)' : describe(value), trace)
+    outcome = { kind: 'returned', text: value === undefined ? '(no value returned)' : describe(value) }
   } catch (error) {
-    const reason = error instanceof Error ? `${error.name}: ${error.message}` : describe(error)
-    throw new ScriptFailed(reason, trace)
+    outcome = { kind: 'failed', reason: error instanceof Error ? `${error.name}: ${error.message}` : describe(error) }
   }
+  await change({ ...run, outcome, elapsedMs: (await host.now()) - startedAt })
+  return run
 }

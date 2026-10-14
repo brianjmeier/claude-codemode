@@ -1,5 +1,8 @@
+import { atom, memberOf, read } from 'claude-code'
 import type { EngineInterface, Register, ToolCallArgs } from 'claude-code'
-import { report, runScript, ScriptFailed, ToolDenied, type ToolHost } from './script.ts'
+import type { Run } from '../types'
+import { report, runScript, type ToolHost } from './script'
+import { drawRun } from './view'
 
 declare module 'claude-code' {
   interface McpToolInputs {
@@ -24,17 +27,28 @@ The program is the body of an async function:
 
 Every call goes through the same permission check, hooks and dialog as if you had made it directly. The program has no filesystem, network, process, imports or eval of its own: side effects happen only through tools.`
 
-const hostOf = ($: EngineInterface): ToolHost => ({
+const runs = atom({ plugin: 'codemode', key: 'runs' } as const, {
+  calls: [],
+  logs: [],
+  outcome: { kind: 'running' },
+  elapsedMs: null,
+} as Run)
+
+const hostOf = ($: EngineInterface, requestId: string): ToolHost => ({
   call: async (tool, args) => {
-    if (tool === TOOL) throw new ToolDenied(tool, 'a program cannot start another program')
+    if (tool === TOOL) return { kind: 'denied', reason: 'a program cannot start another program' }
     const answer = await $.tool.call({ ...args, tool } as ToolCallArgs)
-    if (answer.deny !== undefined) throw new ToolDenied(tool, answer.deny)
-    return { text: answer.text ?? '', result: answer.result, isError: answer.isError === true }
+    if (answer.deny !== undefined) return { kind: 'denied', reason: answer.deny }
+    return { kind: 'answered', text: answer.text ?? '', result: answer.result, isError: answer.isError === true }
   },
   list: async () =>
     (await $.tool.list())
       .filter(info => info.name !== TOOL)
       .map(({ name, description }) => ({ name, description })),
+  now: () => $.clock.now(),
+  publish: async run => {
+    await $.state.set({ plugin: 'codemode', key: 'runs', id: requestId }, run)
+  },
 })
 
 export const register: Register = on => {
@@ -54,11 +68,21 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    try {
-      return { result: await runScript(e.code, hostOf($)) }
-    } catch (error) {
-      if (error instanceof ScriptFailed) return { deny: report(`The program failed: ${error.reason}`, error.trace) }
-      throw error
-    }
-  }).catch(() => ({ deny: 'codemode: the program runner itself failed; nothing more ran.' }))
+    const run = await runScript(e.code, hostOf($, e.tool_use_id))
+    return run.outcome.kind === 'failed' ? { deny: report(run) } : { result: report(run) }
+  }).catch(($, e, next) => ({
+    deny: `codemode: the program runner itself failed (${next.error.message ?? next.error.kind}); nothing more ran.`,
+  }))
+
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (e.props.tool !== TOOL) return next(e)
+    const { code } = e.props.input as Partial<{ code: string }>
+    return drawRun($, e, code ?? '', await read($, memberOf(runs, e)))
+  })
+
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
+    if (e.props.tool !== TOOL) return next(e)
+    const { Box } = $.ui.resolve(e)
+    return <Box />
+  })
 }

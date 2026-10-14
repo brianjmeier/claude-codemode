@@ -1,9 +1,16 @@
-import { test, expect, type Engine } from 'claude-code/testing'
-import { TOOL } from '../hooks/register.ts'
+import type { On } from 'claude-code'
+import { test, expect, mock, type Engine } from 'claude-code/testing'
+import { TOOL } from '../hooks/register'
 
 const run = ($: Engine, code: string) => $.tool.call({ tool: TOOL, code })
 
-test('a program loops over tools and only its final value comes back', async ($, on) => {
+const codemodeTest = (name: string, body: ($: Engine, on: On) => Promise<void>) =>
+  test(name, async ($, on) => {
+    mock.clock(on)
+    await body($, on)
+  })
+
+codemodeTest('a program loops over tools and only its final value comes back', async ($, on) => {
   const files: Record<string, string> = { 'a.md': 'alpha\nTODO one', 'b.md': 'beta', 'c.md': 'TODO two\nTODO three' }
   on('tool.call', { tool: 'Read' }, async (_, e) => ({ result: files[String(e.file_path)] ?? '' }))
 
@@ -23,7 +30,7 @@ test('a program loops over tools and only its final value comes back', async ($,
   )
 })
 
-test('a refused call throws ToolDenied, which the program may catch', async ($, on) => {
+codemodeTest('a refused call throws ToolDenied, which the program may catch', async ($, on) => {
   on('tool.call', { tool: 'Bash' }, async () => ({ deny: 'not in this repo' }))
 
   const ran = await run($, `
@@ -34,7 +41,7 @@ test('a refused call throws ToolDenied, which the program may catch', async ($, 
   expect(ran.result).toBe('Bash: not in this repo\n\ntool calls: Bash')
 })
 
-test('a refusal the program does not catch fails the run, naming the calls it made', async ($, on) => {
+codemodeTest('a refusal the program does not catch fails the run, naming the calls it made', async ($, on) => {
   on('tool.call', { tool: 'Read' }, async () => ({ result: 'ok' }))
   on('tool.call', { tool: 'Bash' }, async () => ({ deny: 'not in this repo' }))
 
@@ -50,7 +57,7 @@ test('a refusal the program does not catch fails the run, naming the calls it ma
   )
 })
 
-test('a tool that errors resolves with isError instead of throwing', async ($, on) => {
+codemodeTest('a tool that errors resolves with isError instead of throwing', async ($, on) => {
   on('tool.call', { tool: 'Bash' }, async () => ({ isError: true, result: 'exit 1', text: 'Exit code 1' }) as never)
 
   const ran = await run($, `
@@ -61,7 +68,7 @@ test('a tool that errors resolves with isError instead of throwing', async ($, o
   expect(ran.result).toBe('{"isError":true,"text":"Exit code 1"}\n\ntool calls: Bash')
 })
 
-test('a program cannot start another program', async $ => {
+codemodeTest('a program cannot start another program', async ($, on) => {
   const ran = await run($, `return await tool("${TOOL}", { code: "return 1" })`)
 
   expect(ran.deny).toBe(
@@ -69,7 +76,7 @@ test('a program cannot start another program', async $ => {
   )
 })
 
-test('the program reaches nothing but its tools: no eval, no engine, no host', async $ => {
+codemodeTest('the program reaches nothing but its tools: no eval, no engine, no host', async ($, on) => {
   const ran = await run($, `
     const reach = name => { try { return typeof eval(name) } catch (error) { return error.name } }
     let built
@@ -89,13 +96,13 @@ test('the program reaches nothing but its tools: no eval, no engine, no host', a
   })
 })
 
-test('a program that does not parse fails before any call', async $ => {
+codemodeTest('a program that does not parse fails before any call', async ($, on) => {
   const ran = await run($, 'return (')
 
   expect(ran.deny).toStartWith('The program failed: SyntaxError')
 })
 
-test('listTools names what the program may call, never itself', async ($, on) => {
+codemodeTest('listTools names what the program may call, never itself', async ($, on) => {
   on('tool.list', async () => ({
     value: [
       { name: 'Read', description: 'Reads a file.', mcp: false },
@@ -108,13 +115,13 @@ test('listTools names what the program may call, never itself', async ($, on) =>
   expect(ran.result).toBe('["Read"]')
 })
 
-test('a program that returns nothing says so', async $ => {
+codemodeTest('a program that returns nothing says so', async ($, on) => {
   const ran = await run($, 'log("done")')
 
   expect(ran.result).toBe('(no value returned)\n\nlog:\ndone')
 })
 
-test('each call inside the program meets the permission check with its own arguments', async ($, on) => {
+codemodeTest('each call inside the program meets the permission check with its own arguments', async ($, on) => {
   const asked: string[] = []
   on('classic.PreToolUse', async (_, e) => {
     const { file_path } = e as unknown as { file_path: string }
@@ -134,4 +141,50 @@ test('each call inside the program meets the permission check with its own argum
 
   expect(asked).toEqual(['Read a.md', 'Read .env'])
   expect(ran.result).toBe('a.md, .env refused: secrets stay out\n\ntool calls: Read ×2')
+})
+
+codemodeTest('the row shows the program, each call it made, and what came back', async ($, on) => {
+  const runs = new Set<string>()
+  on('state.set', async (_, e, next) => {
+    runs.add(String((e as unknown as { id: string }).id))
+    return next(e)
+  })
+  on('tool.call', { tool: 'Read' }, async () => ({ result: 'ok' }))
+  on('tool.call', { tool: 'Bash' }, async () => ({ deny: 'no jj here' }))
+  const code = 'await tools.Read({ file_path: "a.md" })\ntry { await tools.Bash({ command: "jj log" }) } catch {}\nreturn "two calls"'
+
+  const ran = await run($, code)
+  const [requestId] = [...runs]
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({
+      plugin: 'codemode',
+      surface,
+      component: 'ToolUse',
+      requestId,
+      props: { tool_use_id: requestId ?? '', tool: TOOL, input: { code }, isRunning: false, isErrored: false, isInterrupted: false, output: ran.result },
+    })
+    const shown = (await ui.find({ type: 'Box' }))?.text ?? ''
+    expect(shown).toContain('⏺ codemode · 2 calls · 0ms')
+    expect(shown).toContain('tools.Read({ file_path: "a.md" })')
+    expect(shown).toContain('✓ Read a.md 0ms')
+    expect(shown).toContain('✗ Bash jj log denied')
+    expect(shown).toContain('two calls')
+    expect(shown).not.toContain('tool calls:')
+    await ui.unmount()
+  }
+})
+
+codemodeTest('the row draws while the program is still being written', async $ => {
+  for (const isRunning of [false, true]) {
+    const ui = await $.ui.mount({
+      plugin: 'codemode',
+      surface: 'terminal',
+      component: 'ToolUse',
+      props: { tool_use_id: 'streaming', tool: TOOL, input: {}, isRunning, isErrored: false, isInterrupted: false },
+    })
+
+    expect((await ui.find({ type: 'Box' }))?.text).toStartWith('⏺ codemode')
+    await ui.unmount()
+  }
 })
