@@ -22,7 +22,7 @@ The program is the body of an async function:
 - \`await tools.Grep({ pattern: "TODO" })\` is the same call for names that are valid property names.
 - Each call resolves \`{ text, result, isError }\`: \`text\` is what you would have read, \`result\` the tool's structured record (Read: \`result.file.content\`; Bash: \`result.stdout\`, \`result.stderr\`). A tool that fails resolves with \`isError: true\`.
 - A call the permission check refuses throws \`ToolDenied\` (\`e.tool\`, \`e.reason\`).
-- \`await ask({ model: "haiku", prompt: "..." })\` asks a model one question with no tools and resolves its answer as text; hand it the text it needs. Several can run at once with \`Promise.all\`.
+- \`await ask({ model: "haiku", prompt: "..." })\` asks a model one question with no tools and resolves its answer as text; hand it the text it needs. Several can run at once with \`Promise.all\`. Start each prompt with what differs (\`prs: summarize…\`): the person sees the first words of every call.
 - \`await agent({ type: "Explore", prompt: "..." })\` starts a subagent and resolves \`{ agentId }\` at once; its answer reaches you as a normal subagent hand-back, not the program.
 - \`await listTools()\` returns \`[{ name, description }]\`.
 - \`await canCall(name, args)\` returns \`"allow"\`, \`"ask"\` or \`"deny"\`: what the permission check would decide, without running anything.
