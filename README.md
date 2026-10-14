@@ -5,7 +5,7 @@ writes a JavaScript program, the program calls Claude Code's own tools
 (`Read`, `Bash`, `Edit`, MCP tools — anything the session has), and only the
 program's return value comes back into the conversation.
 
-![One codemode program reads every station README, asks haiku for a one-line summary of each in parallel, writes a Claude Doc, and starts an Explore subagent](docs/demo.svg)
+![One codemode program reads every station README, asks haiku for a one-line summary of each in parallel, writes a Claude Doc, and starts an Explore subagent](docs/demo.gif)
 
 It ships with a `codemode` skill that tells the model when a program beats
 direct calls and how to write one.
