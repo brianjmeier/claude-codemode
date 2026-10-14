@@ -28,41 +28,26 @@ Call tools directly instead when:
 
 ## The program
 
-The body of an async function. Globals:
+The tool's own description lists what the program has (`tool`, `tools.Name`,
+`listTools`, `log`, `ToolDenied`) and what each call resolves to. Two choices
+it leaves to you:
 
-| Global | What it does |
-| --- | --- |
-| `await tool(name, args)` | Calls any tool by name with its usual arguments |
-| `await tools.Name(args)` | The same, for names that are valid identifiers (`tools.Read`, `tools.Grep`, `tools.Bash`) |
-| `await listTools()` | `[{ name, description }]` of what the program may call |
-| `log(...values)` | Adds a line to the output |
-| `ToolDenied` | The error a refused call throws (`error.tool`, `error.reason`) |
-
-Each call resolves `{ text, result, isError }`:
-
-- `text` — what you would have read had you made the call
-- `result` — the tool's structured record. The two you will use most:
-  - `Read`: `result.file.content` (the file without line numbers), `result.file.totalLines`
-  - `Bash`: `result.stdout`, `result.stderr`, `result.interrupted`
-
-  For any other tool, read `text`, or `return` one `result` once to see its shape.
-- `isError` — the tool ran and failed (a non-zero Bash exit, a missing file); it does **not** throw
-
-A permission refusal **throws** `ToolDenied`. Catch it when the loop should go
-on without that item; leave it uncaught when the whole run should stop.
-
-`return` a string to get it back verbatim, anything else to get JSON.
+- A tool that fails resolves with `isError: true`; a permission refusal
+  **throws** `ToolDenied`. Catch it when the loop should go on without that
+  item; leave it uncaught when the whole run should stop.
+- `result` shapes differ per tool. Beyond `Read` and `Bash`, read `text`, or
+  `return` one `result` once to see its shape.
 
 ## Patterns
 
 Count matches across files, return only the table:
 
 ```js
-const { text } = await tools.Glob({ pattern: "src/**/*.ts" })
+const listed = await tools.Bash({ command: "rg --files -g '*.ts' src" })
 const rows = []
-for (const file of text.split("\n").filter(Boolean)) {
-  const { text: body } = await tools.Read({ file_path: file })
-  const todos = body.split("\n").filter(line => line.includes("TODO")).length
+for (const file of listed.result.stdout.split("\n").filter(Boolean)) {
+  const { result } = await tools.Read({ file_path: file })
+  const todos = result.file.content.split("\n").filter(line => line.includes("TODO")).length
   if (todos > 0) rows.push({ file, todos })
 }
 return rows.sort((a, b) => b.todos - a.todos).slice(0, 10)
@@ -75,7 +60,7 @@ const out = []
 for (const pkg of ["api", "web", "worker"]) {
   try {
     const run = await tools.Bash({ command: `git -C packages/${pkg} log -1 --format=%cr` })
-    out.push(`${pkg}: ${run.text.trim()}`)
+    out.push(`${pkg}: ${run.result.stdout.trim()}`)
   } catch (error) {
     if (!(error instanceof ToolDenied)) throw error
     log(`${pkg} skipped: ${error.reason}`)

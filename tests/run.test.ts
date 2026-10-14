@@ -1,31 +1,27 @@
 import { test, expect, type Engine } from 'claude-code/testing'
+import { TOOL } from '../hooks/register.ts'
 
-const TOOL = 'mcp__codemode__run'
+const run = ($: Engine, code: string) => $.tool.call({ tool: TOOL, code })
 
 test('a program loops over tools and only its final value comes back', async ($, on) => {
   const files: Record<string, string> = { 'a.md': 'alpha\nTODO one', 'b.md': 'beta', 'c.md': 'TODO two\nTODO three' }
   on('tool.call', { tool: 'Read' }, async (_, e) => ({ result: files[String(e.file_path)] ?? '' }))
 
-  const ran = await $.tool.call({
-    tool: TOOL,
-    code: `
-      const counts = {}
-      for (const file of ["a.md", "b.md", "c.md"]) {
-        const { result } = await tools.Read({ file_path: file })
-        counts[file] = result.split("\\n").filter(line => line.includes("TODO")).length
-      }
-      log("read", Object.keys(counts).length, "files")
-      return counts
-    `,
-  } as never)
+  const ran = await run($, `
+    const counts = {}
+    for (const file of ["a.md", "b.md", "c.md"]) {
+      const { result } = await tools.Read({ file_path: file })
+      counts[file] = result.split("\\n").filter(line => line.includes("TODO")).length
+    }
+    log("read", Object.keys(counts).length, "files")
+    return counts
+  `)
 
   expect(ran.deny).toBeUndefined()
   expect(ran.result).toBe(
-    '{\n  "a.md": 1,\n  "b.md": 0,\n  "c.md": 2\n}\n\nlog:\nread 3 files\n\ntool calls: Read ×3',
+    '{"a.md":1,"b.md":0,"c.md":2}\n\nlog:\nread 3 files\n\ntool calls: Read ×3',
   )
 })
-
-const run = ($: Engine, code: string) => $.tool.call({ tool: TOOL, code } as never)
 
 test('a refused call throws ToolDenied, which the program may catch', async ($, on) => {
   on('tool.call', { tool: 'Bash' }, async () => ({ deny: 'not in this repo' }))
@@ -62,7 +58,7 @@ test('a tool that errors resolves with isError instead of throwing', async ($, o
     return { isError: out.isError, text: out.text }
   `)
 
-  expect(ran.result).toBe('{\n  "isError": true,\n  "text": "Exit code 1"\n}\n\ntool calls: Bash')
+  expect(ran.result).toBe('{"isError":true,"text":"Exit code 1"}\n\ntool calls: Bash')
 })
 
 test('a program cannot start another program', async $ => {
@@ -109,7 +105,7 @@ test('listTools names what the program may call, never itself', async ($, on) =>
 
   const ran = await run($, 'return (await listTools()).map(t => t.name)')
 
-  expect(ran.result).toBe('[\n  "Read"\n]')
+  expect(ran.result).toBe('["Read"]')
 })
 
 test('a program that returns nothing says so', async $ => {

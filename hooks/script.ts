@@ -1,23 +1,18 @@
 import Sval from './vendor/sval.js'
 
-export type ToolAnswer = { text: string; result: unknown; isError: boolean }
+type ToolAnswer = { text: string; result: unknown; isError: boolean }
 
 export type ToolHost = {
   call: (tool: string, args: Record<string, unknown>) => Promise<ToolAnswer>
   list: () => Promise<readonly { name: string; description: string }[]>
 }
 
-export type ScriptRun = {
-  value: unknown
-  logs: readonly string[]
-  calls: readonly string[]
-}
+type Trace = { logs: readonly string[]; calls: readonly string[] }
 
 export class ScriptFailed extends Error {
   constructor(
     readonly reason: string,
-    readonly logs: readonly string[],
-    readonly calls: readonly string[],
+    readonly trace: Trace,
   ) {
     super(reason)
   }
@@ -36,9 +31,25 @@ export class ToolDenied extends Error {
 const describe = (value: unknown): string =>
   typeof value === 'string' ? value : (JSON.stringify(value) ?? String(value))
 
-export async function runScript(code: string, host: ToolHost): Promise<ScriptRun> {
+const counted = (calls: readonly string[]): string => {
+  const counts = new Map<string, number>()
+  for (const call of calls) counts.set(call, (counts.get(call) ?? 0) + 1)
+  return [...counts].map(([name, n]) => (n === 1 ? name : `${name} ×${n}`)).join(', ')
+}
+
+export const report = (head: string, trace: Trace): string =>
+  [
+    head,
+    trace.logs.length === 0 ? '' : `log:\n${trace.logs.join('\n')}`,
+    trace.calls.length === 0 ? '' : `tool calls: ${counted(trace.calls)}`,
+  ]
+    .filter(part => part !== '')
+    .join('\n\n')
+
+export async function runScript(code: string, host: ToolHost): Promise<string> {
   const logs: string[] = []
   const calls: string[] = []
+  const trace = { logs, calls }
 
   const tool = (name: string, args: Record<string, unknown>) => {
     calls.push(name)
@@ -61,9 +72,9 @@ export async function runScript(code: string, host: ToolHost): Promise<ScriptRun
   try {
     interpreter.run(`exports.run = (async () => {\n${code}\n})()`)
     const value: unknown = await (interpreter.exports as { run: Promise<unknown> }).run
-    return { value, logs, calls }
+    return report(value === undefined ? '(no value returned)' : describe(value), trace)
   } catch (error) {
     const reason = error instanceof Error ? `${error.name}: ${error.message}` : describe(error)
-    throw new ScriptFailed(reason, logs, calls)
+    throw new ScriptFailed(reason, trace)
   }
 }

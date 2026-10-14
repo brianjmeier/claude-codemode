@@ -1,7 +1,12 @@
 import type { EngineInterface, Register, ToolCallArgs } from 'claude-code'
-import { runScript, ScriptFailed, ToolDenied, type ScriptRun, type ToolHost } from './script.ts'
+import { report, runScript, ScriptFailed, ToolDenied, type ToolHost } from './script.ts'
 
-export const TOOL_NAME = 'run'
+declare module 'claude-code' {
+  interface McpToolInputs {
+    mcp__codemode__run: { code: string }
+  }
+}
+
 export const TOOL = 'mcp__codemode__run'
 
 const DESCRIPTION = `Run one JavaScript program that calls Claude Code's own tools and returns only its final value.
@@ -19,24 +24,6 @@ The program is the body of an async function:
 
 Every call goes through the same permission check, hooks and dialog as if you had made it directly. The program has no filesystem, network, process, imports or eval of its own: side effects happen only through tools.`
 
-const counted = (calls: readonly string[]): string => {
-  const counts = new Map<string, number>()
-  for (const call of calls) counts.set(call, (counts.get(call) ?? 0) + 1)
-  return [...counts].map(([name, n]) => (n === 1 ? name : `${name} ×${n}`)).join(', ')
-}
-
-const show = (value: unknown): string =>
-  value === undefined ? '(no value returned)' : typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-
-export const report = (run: Pick<ScriptRun, 'logs' | 'calls'>, head: string): string =>
-  [
-    head,
-    run.logs.length === 0 ? '' : `log:\n${run.logs.join('\n')}`,
-    run.calls.length === 0 ? '' : `tool calls: ${counted(run.calls)}`,
-  ]
-    .filter(part => part !== '')
-    .join('\n\n')
-
 const hostOf = ($: EngineInterface): ToolHost => ({
   call: async (tool, args) => {
     if (tool === TOOL) throw new ToolDenied(tool, 'a program cannot start another program')
@@ -53,7 +40,7 @@ const hostOf = ($: EngineInterface): ToolHost => ({
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.tool.register({
-      name: TOOL_NAME,
+      name: 'run',
       description: DESCRIPTION,
       inputSchema: {
         type: 'object',
@@ -67,12 +54,10 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
-    const { code } = e as unknown as { code: string }
     try {
-      const run = await runScript(code, hostOf($))
-      return { result: report(run, show(run.value)) }
+      return { result: await runScript(e.code, hostOf($)) }
     } catch (error) {
-      if (error instanceof ScriptFailed) return { deny: report(error, `The program failed: ${error.reason}`) }
+      if (error instanceof ScriptFailed) return { deny: report(`The program failed: ${error.reason}`, error.trace) }
       throw error
     }
   }).catch(() => ({ deny: 'codemode: the program runner itself failed; nothing more ran.' }))

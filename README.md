@@ -19,7 +19,7 @@ return rows.sort((a, b) => b.todos - a.todos).slice(0, 10)
 Thirty reads, one result in context:
 
 ```
-[ { "file": "src/a.ts", "todos": 4 }, ... ]
+[{"file":"src/a.ts","todos":4},...]
 
 tool calls: Bash, Read ×30
 ```
@@ -38,16 +38,9 @@ Or for one session: `claude --plugin-dir <this folder>`.
 
 ## The program's world
 
-| Global | |
-| --- | --- |
-| `await tool(name, args)` | any tool the session has, by name |
-| `await tools.Name(args)` | the same, as a property |
-| `await listTools()` | `[{ name, description }]` |
-| `log(...values)` | a line in the output |
-| `ToolDenied` | what a refused call throws (`tool`, `reason`) |
-
-A call resolves `{ text, result, isError }`. A tool that fails resolves with
-`isError: true`; a call the permission check refuses throws `ToolDenied`.
+`tool(name, args)`, `tools.Name(args)`, `listTools()`, `log(...)` and
+`ToolDenied`. The tool's description is the full contract the model reads;
+[`skills/codemode/SKILL.md`](skills/codemode/SKILL.md) says when to use it.
 
 ## Permissions and containment
 
