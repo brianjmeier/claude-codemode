@@ -1,4 +1,5 @@
-// sval 0.6.12 (MIT, https://github.com/Siubaak/sval), vendored unmodified from dist/sval.js.
+// sval 0.6.12 (MIT, https://github.com/Siubaak/sval), vendored from dist/sval.js with one fix:
+// an untagged template literal's pieces evaluate to their cooked value, not their raw text.
 // @ts-nocheck
 const Er = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
@@ -4203,7 +4204,7 @@ function* js(e, t) {
   return r(Qe(s), ...u);
 }
 function* Di(e, t) {
-  return e.value.raw;
+  return e.value.cooked;
 }
 function* Us(e, t) {
   if (e.id && e.id.name) {
@@ -5188,7 +5189,7 @@ function Aa(e, t) {
   return r(Qe(s), ...u);
 }
 function rr(e, t) {
-  return e.value.raw;
+  return e.value.cooked;
 }
 function Pa(e, t) {
   if (e.id && e.id.name) {

@@ -70,4 +70,4 @@ claude plugin validate .
 claude plugin test .
 ```
 
-`hooks/vendor/sval.js` is sval 0.6.12 (MIT), vendored unmodified.
+`hooks/vendor/sval.js` is sval 0.6.12 (MIT), vendored with one fix: untagged template literals process their escapes (upstream returns the raw text).

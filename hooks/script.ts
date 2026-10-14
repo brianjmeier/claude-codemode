@@ -38,9 +38,9 @@ const SUMMARY_LENGTH = 120
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, SUMMARY_LENGTH)
 
-const summaryOf = (args: Record<string, unknown>): string => {
+const summaryOf = (args: Record<string, unknown>, root: string): string => {
   const key = SUMMARY_KEYS.find(name => typeof args[name] === 'string')
-  return oneLine(key === undefined ? JSON.stringify(args) : String(args[key]))
+  return oneLine((key === undefined ? JSON.stringify(args) : String(args[key])).replaceAll(`${root}/`, ''))
 }
 
 const describe = (value: unknown): string =>
@@ -69,6 +69,7 @@ export const report = (run: Run): string =>
 
 export async function runScript(code: string, host: ToolHost): Promise<Run> {
   const startedAt = await host.now()
+  const root = await host.cwd()
   let run: Run = { calls: [], logs: [], outcome: { kind: 'running' }, elapsedMs: null }
   const change = (next: Run) => {
     run = next
@@ -96,7 +97,7 @@ export async function runScript(code: string, host: ToolHost): Promise<Run> {
   }
 
   const tool = async (name: string, args: Record<string, unknown>) => {
-    const answer = await record(name, summaryOf(args), () => host.call(name, args))
+    const answer = await record(name, summaryOf(args, root), () => host.call(name, args))
     return answer.kind === 'answered' ? { text: answer.text, result: answer.result, isError: answer.isError } : answer
   }
   const agent = async (ask: AgentAsk) => {

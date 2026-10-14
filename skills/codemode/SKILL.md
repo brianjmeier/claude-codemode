@@ -42,6 +42,9 @@ it leaves to you:
   files first and hand it their contents. `agent({ type, prompt })` starts a
   real subagent with tools, but its answer comes back to you later as a
   hand-back, never to the program: use it to kick off work, not to aggregate.
+  Lead each prompt with what differs between them (`prs: …`, `backlog: …`):
+  the row shows the start of every prompt, so a shared preamble makes every
+  line look the same.
 - Before a loop of calls that might prompt the person, `canCall(name, args)`
   says `allow`, `ask` or `deny` without running anything; skip or batch rather
   than stack up dialogs. `cwd()` gives the working directory for absolute paths.

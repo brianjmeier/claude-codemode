@@ -27,6 +27,16 @@ const tail = (text: string, count: number) => {
   return { shown: lines.slice(-count), hidden: Math.max(0, lines.length - count) }
 }
 
+const MCP_NAME = /^mcp__(.+)__(.+)$/
+const SERVER_PREFIX = /^(claude_ai_|plugin_[a-z0-9-]+_)/
+
+const labelOf = (tool: string): string => {
+  const mcp = MCP_NAME.exec(tool)
+  if (mcp === null) return tool
+  const [, server = '', name = ''] = mcp
+  return `${server.replace(SERVER_PREFIX, '').replaceAll('_', ' ')} › ${name}`
+}
+
 const markOf = (call: NestedCall) => (call.status === 'denied' ? MARK.failed : MARK[call.status])
 
 const settledAs = (call: NestedCall): string => {
@@ -74,7 +84,7 @@ export function drawRun($: EngineInterface, e: RenderInput<'ToolUse'>, source: P
           {run.calls.map(call => (
             <Text wrap="truncate-end">
               <Text color={markOf(call).color}>{markOf(call).glyph} </Text>
-              <Text weight="bold">{call.tool}</Text>
+              <Text weight="bold">{labelOf(call.tool)}</Text>
               <Text>{` ${call.summary}`}</Text>
               <Text dimColor>{settledAs(call)}</Text>
             </Text>

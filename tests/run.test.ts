@@ -7,6 +7,7 @@ const run = ($: Engine, code: string) => $.tool.call({ tool: TOOL, code })
 const codemodeTest = (name: string, body: ($: Engine, on: On) => Promise<void>) =>
   test(name, async ($, on) => {
     mock.clock(on)
+    on('session.cwd', async () => ({ value: '/work/repo' }))
     await body($, on)
   })
 
@@ -283,10 +284,40 @@ codemodeTest('canCall() says what the permission check would decide without runn
   expect(ran).toBe(false)
 })
 
-codemodeTest('cwd() hands the program the session\'s working directory', async ($, on) => {
-  on('session.cwd', async () => ({ value: '/work/repo' }))
-
+codemodeTest('cwd() hands the program the session\'s working directory', async $ => {
   const answer = await run($, 'return cwd()')
 
   expect(answer.result).toBe('/work/repo')
+})
+
+codemodeTest('the row names calls the way a person reads them: paths from the working directory, MCP tools by server', async ($, on) => {
+  const runs = new Set<string>()
+  on('state.set', async (_, e, next) => {
+    runs.add(String((e as unknown as { id: string }).id))
+    return next(e)
+  })
+  on('tool.call', { tool: 'Read' }, async () => ({ result: 'ok' }))
+  on('tool.call', { tool: /^mcp__claude_ai_Claude_Docs__guide$/ }, async () => ({ result: 'ok' }))
+  const code = 'await tools.Read({ file_path: "/work/repo/src/a.ts" })\nawait tool("mcp__claude_ai_Claude_Docs__guide", { items: ["topic.index"] })\nreturn 1'
+
+  const ran = await run($, code)
+  const [requestId] = [...runs]
+  const ui = await $.ui.mount({
+    plugin: 'codemode',
+    surface: 'terminal',
+    component: 'ToolUse',
+    requestId,
+    props: { tool_use_id: requestId ?? '', tool: TOOL, input: { code }, isRunning: false, isErrored: false, isInterrupted: false, output: ran.result },
+  })
+  const shown = (await ui.find({ type: 'Box' }))?.text ?? ''
+
+  expect(shown).toContain('✓ Read src/a.ts 0ms')
+  expect(shown).toContain('✓ Claude Docs › guide')
+  await ui.unmount()
+})
+
+codemodeTest('template literals process their escapes as JavaScript does', async $ => {
+  const ran = await run($, 'const x = "d"; return [`a\\nb`, `grep \'^readme\\\\.md$\'`, `${x}\\t${x}`, String.raw`a\\nb`]')
+
+  expect(ran.result).toBe(JSON.stringify(['a\nb', "grep '^readme\\.md$'", 'd\td', 'a\\nb']))
 })
