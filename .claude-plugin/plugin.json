@@ -1,0 +1,7 @@
+{
+  "name": "codemode",
+  "version": "0.1.0",
+  "description": "One tool that runs a JavaScript program over Claude Code's own tools and returns only its final value.",
+  "author": { "name": "Brian Meier" },
+  "license": "MIT"
+}

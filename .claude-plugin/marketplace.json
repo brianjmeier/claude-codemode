@@ -1,0 +1,16 @@
+{
+  "name": "claude-codemode",
+  "owner": {
+    "name": "Brian Meier"
+  },
+  "metadata": {
+    "description": "codemode: one JavaScript program over Claude Code's own tools."
+  },
+  "plugins": [
+    {
+      "name": "codemode",
+      "source": "./",
+      "description": "One tool that runs a JavaScript program over Claude Code's own tools and returns only its final value."
+    }
+  ]
+}
