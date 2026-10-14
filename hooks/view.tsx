@@ -21,6 +21,11 @@ const head = (text: string, count: number) => {
   return { shown: lines.slice(0, count), hidden: Math.max(0, lines.length - count) }
 }
 
+const tail = (text: string, count: number) => {
+  const lines = text.split('\n')
+  return { shown: lines.slice(-count), hidden: Math.max(0, lines.length - count) }
+}
+
 const markOf = (call: NestedCall) => (call.status === 'denied' ? MARK.failed : MARK[call.status])
 
 const settledAs = (call: NestedCall): string => {
@@ -40,10 +45,13 @@ const outcomeOf = (props: RenderInput<'ToolUse'>['props'], run: Run): Outcome =>
   return props.isErrored ? { kind: 'failed', reason: text } : { kind: 'returned', text }
 }
 
-export function drawRun($: EngineInterface, e: RenderInput<'ToolUse'>, code: string, run: Run) {
+export type Program = { kind: 'typing' | 'written'; code: string }
+
+export function drawRun($: EngineInterface, e: RenderInput<'ToolUse'>, source: Program, run: Run) {
   const { Box, Text, Code } = $.ui.resolve(e)
   const outcome = outcomeOf(e.props, run)
-  const program = head(code.trim(), CODE_LINES)
+  const isTyping = source.kind === 'typing'
+  const program = isTyping ? tail(source.code, CODE_LINES) : head(source.code.trim(), CODE_LINES)
   const answer = answerOf(outcome)
 
   return (
@@ -55,8 +63,9 @@ export function drawRun($: EngineInterface, e: RenderInput<'ToolUse'>, code: str
         {run.elapsedMs !== null && <Text dimColor>{` · ${duration(run.elapsedMs)}`}</Text>}
       </Text>
       <Box flexDirection="column" paddingLeft={2}>
-        <Code source={program.shown.join("\n")} language="javascript" wrap="truncate-end" />
-        {program.hidden > 0 && <Text dimColor>… {plural(program.hidden, 'more line')}</Text>}
+        {isTyping && program.hidden > 0 && <Text dimColor>… {plural(program.hidden, 'line')} above</Text>}
+        <Code source={`${program.shown.join('\n')}${isTyping ? '▌' : ''}`} language="javascript" wrap="truncate-end" />
+        {!isTyping && program.hidden > 0 && <Text dimColor>… {plural(program.hidden, 'more line')}</Text>}
       </Box>
       {run.calls.length > 0 && (
         <Box flexDirection="column" marginTop={1} paddingLeft={2}>

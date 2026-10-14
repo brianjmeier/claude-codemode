@@ -13,6 +13,6 @@ export type Run = {
 
 declare module 'claude-code' {
   interface PluginState {
-    codemode: { runs: StateFamily<Run> }
+    codemode: { runs: StateFamily<Run>; typed: StateFamily<string> }
   }
 }

@@ -2,7 +2,8 @@ import { atom, memberOf, read } from 'claude-code'
 import type { EngineInterface, Register, ToolCallArgs } from 'claude-code'
 import type { Run } from '../types'
 import { report, runScript, type ToolHost } from './script'
-import { drawRun } from './view'
+import { codeSoFar } from './typing'
+import { drawRun, type Program } from './view'
 
 declare module 'claude-code' {
   interface McpToolInputs {
@@ -33,6 +34,8 @@ const runs = atom({ plugin: 'codemode', key: 'runs' } as const, {
   outcome: { kind: 'running' },
   elapsedMs: null,
 } as Run)
+
+const typed = atom({ plugin: 'codemode', key: 'typed' } as const, '')
 
 const hostOf = ($: EngineInterface, requestId: string): ToolHost => ({
   call: async (tool, args) => {
@@ -74,10 +77,29 @@ export const register: Register = on => {
     deny: `codemode: the program runner itself failed (${next.error.message ?? next.error.kind}); nothing more ran.`,
   }))
 
+  on('turn.step', async function* ($, e, next) {
+    const ours = new Map<number, { id: string; json: string; code: string }>()
+    for await (const chunk of next(e)) {
+      if (chunk.kind === 'tool' && chunk.name === TOOL) ours.set(chunk.index, { id: chunk.id, json: '', code: '' })
+      const call = chunk.kind === 'input' ? ours.get(chunk.index) : undefined
+      if (call !== undefined && chunk.kind === 'input') {
+        call.json += chunk.json
+        const code = codeSoFar(call.json)
+        if (code !== call.code) {
+          call.code = code
+          await $.state.set({ plugin: 'codemode', key: 'typed', id: call.id }, code)
+        }
+      }
+      yield chunk
+    }
+  })
+
   on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
     if (e.props.tool !== TOOL) return next(e)
     const { code } = e.props.input as Partial<{ code: string }>
-    return drawRun($, e, code ?? '', await read($, memberOf(runs, e)))
+    const program: Program =
+      code === undefined ? { kind: 'typing', code: await read($, memberOf(typed, e)) } : { kind: 'written', code }
+    return drawRun($, e, program, await read($, memberOf(runs, e)))
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
