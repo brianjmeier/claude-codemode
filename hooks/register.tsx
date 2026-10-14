@@ -22,7 +22,11 @@ The program is the body of an async function:
 - \`await tools.Grep({ pattern: "TODO" })\` is the same call for names that are valid property names.
 - Each call resolves \`{ text, result, isError }\`: \`text\` is what you would have read, \`result\` the tool's structured record (Read: \`result.file.content\`; Bash: \`result.stdout\`, \`result.stderr\`). A tool that fails resolves with \`isError: true\`.
 - A call the permission check refuses throws \`ToolDenied\` (\`e.tool\`, \`e.reason\`).
+- \`await ask({ model: "haiku", prompt: "..." })\` asks a model one question with no tools and resolves its answer as text; hand it the text it needs. Several can run at once with \`Promise.all\`.
+- \`await agent({ type: "Explore", prompt: "..." })\` starts a subagent and resolves \`{ agentId }\` at once; its answer reaches you as a normal subagent hand-back, not the program.
 - \`await listTools()\` returns \`[{ name, description }]\`.
+- \`await canCall(name, args)\` returns \`"allow"\`, \`"ask"\` or \`"deny"\`: what the permission check would decide, without running anything.
+- \`await cwd()\` returns the session's working directory, for absolute paths.
 - \`log(...values)\` adds a line to the output.
 - \`return\` the value you want back; objects come back as JSON.
 
@@ -44,10 +48,23 @@ const hostOf = ($: EngineInterface, requestId: string): ToolHost => ({
     if (answer.deny !== undefined) return { kind: 'denied', reason: answer.deny }
     return { kind: 'answered', text: answer.text ?? '', result: answer.result, isError: answer.isError === true }
   },
+  agent: async ({ type, prompt }) => {
+    const spawned = await $.agent.spawn({ prompt, subagentType: type, description: prompt.slice(0, 40) })
+    if (spawned.deny !== undefined) return { kind: 'denied', reason: spawned.deny }
+    if (spawned.agentId === undefined) return { kind: 'denied', reason: `the ${type} subagent did not start` }
+    return { kind: 'started', agentId: spawned.agentId }
+  },
+  ask: async ({ model, prompt }) => {
+    const answer = await $.model.complete({ model, prompt })
+    if (answer.isAnswered) return { kind: 'answered', text: answer.text, result: answer.text, isError: false }
+    return { kind: 'answered', text: answer.reason, result: answer.reason, isError: true }
+  },
   list: async () =>
     (await $.tool.list())
       .filter(info => info.name !== TOOL)
       .map(({ name, description }) => ({ name, description })),
+  check: async (tool, args) => (await $.tool.check({ tool, input: args })).decision,
+  cwd: () => $.session.cwd(),
   now: () => $.clock.now(),
   publish: async run => {
     await $.state.set({ plugin: 'codemode', key: 'runs', id: requestId }, run)

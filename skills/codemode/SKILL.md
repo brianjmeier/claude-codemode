@@ -37,6 +37,14 @@ it leaves to you:
   item; leave it uncaught when the whole run should stop.
 - `result` shapes differ per tool. Beyond `Read` and `Bash`, read `text`, or
   `return` one `result` once to see its shape.
+- `ask()` or `agent()`: `ask({ model: "haiku", prompt })` answers inside the
+  program, from the text you put in the prompt, with no tools, so read the
+  files first and hand it their contents. `agent({ type, prompt })` starts a
+  real subagent with tools, but its answer comes back to you later as a
+  hand-back, never to the program: use it to kick off work, not to aggregate.
+- Before a loop of calls that might prompt the person, `canCall(name, args)`
+  says `allow`, `ask` or `deny` without running anything; skip or batch rather
+  than stack up dialogs. `cwd()` gives the working directory for absolute paths.
 
 ## Patterns
 

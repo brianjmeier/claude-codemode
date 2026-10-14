@@ -188,3 +188,105 @@ codemodeTest('the row draws while the program is still being written', async $ =
     await ui.unmount()
   }
 })
+
+codemodeTest('agent() asks for each subagent at once, and one that never starts is reported, not waited on', async ($, on) => {
+  const spawned: string[] = []
+  on('agent.spawn', async (_, e) => {
+    spawned.push((e as unknown as { subagent_type: string }).subagent_type)
+    return { model: 'haiku' }
+  })
+
+  const ran = await run($, `
+    const asked = await Promise.allSettled([
+      agent({ type: "Explore", prompt: "summarize the prs station" }),
+      agent({ type: "Plan", prompt: "summarize the backlog station" }),
+    ])
+    return asked.map(a => a.reason.reason).join(" | ")
+  `)
+
+  expect(spawned).toEqual(['Explore', 'Plan'])
+  expect(ran.result).toBe('the Explore subagent did not start | the Plan subagent did not start\n\ntool calls: Explore, Plan')
+})
+
+codemodeTest('a refused subagent throws ToolDenied', async ($, on) => {
+  on('agent.spawn', async () => ({ deny: 'no subagents here' }))
+
+  const ran = await run($, `
+    try { await agent({ type: "Explore", prompt: "x" }) } catch (error) { return error.tool + ": " + error.reason }
+  `)
+
+  expect(ran.result).toBe('Explore: no subagents here\n\ntool calls: Explore')
+})
+
+codemodeTest('parallel calls each keep their own line', async ($, on) => {
+  const runs = new Set<string>()
+  on('state.set', async (_, e, next) => {
+    runs.add(String((e as unknown as { id: string }).id))
+    return next(e)
+  })
+  on('tool.call', { tool: 'Read' }, async (_, e) => ({ result: String(e.file_path) }))
+  const code = 'return (await Promise.all(["a.md", "b.md", "c.md"].map(file => tools.Read({ file_path: file })))).length'
+
+  const ran = await run($, code)
+  const [requestId] = [...runs]
+  const ui = await $.ui.mount({
+    plugin: 'codemode',
+    surface: 'terminal',
+    component: 'ToolUse',
+    requestId,
+    props: { tool_use_id: requestId ?? '', tool: TOOL, input: { code }, isRunning: false, isErrored: false, isInterrupted: false, output: ran.result },
+  })
+  const shown = (await ui.find({ type: 'Box' }))?.text ?? ''
+
+  for (const file of ['a.md', 'b.md', 'c.md']) expect(shown).toContain(`✓ Read ${file} 0ms`)
+  await ui.unmount()
+})
+
+const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+
+codemodeTest('ask() puts questions to a model in parallel and hands the answers to the program', async ($, on) => {
+  on('model.complete', async (_, e) => ({
+    value: { isAnswered: true as const, text: `${e.model}: ${e.prompt.toUpperCase()}`, usage: USAGE },
+  }))
+
+  const ran = await run($, `
+    const answers = await Promise.all(["prs", "backlog"].map(name => ask({ model: "haiku", prompt: name })))
+    return answers.join(" | ")
+  `)
+
+  expect(ran.result).toBe('haiku: PRS | haiku: BACKLOG\n\ntool calls: ask haiku ×2')
+})
+
+codemodeTest('an ask() the model does not answer throws, naming why', async ($, on) => {
+  on('model.complete', async () => ({
+    value: { isAnswered: false as const, reason: 'empty-reply' as const, usage: USAGE },
+  }))
+
+  const ran = await run($, `
+    try { await ask({ model: "haiku", prompt: "x" }) } catch (error) { return error.message }
+  `)
+
+  expect(ran.result).toBe('ask haiku failed: empty-reply\n\ntool calls: ask haiku')
+})
+
+codemodeTest('canCall() says what the permission check would decide without running the call', async ($, on) => {
+  let ran = false
+  on('tool.check', async (_, e) => ({ decision: (e.input as { command: string }).command.startsWith('jj') ? ('deny' as const) : ('allow' as const) }))
+  on('tool.call', { tool: 'Bash' }, async () => {
+    ran = true
+    return { result: 'ran' }
+  })
+
+  const answer = await run($, 'return [await canCall("Bash", { command: "jj log" }), await canCall("Bash", { command: "ls" })].join(",")')
+
+  expect(answer.result).toBe('deny,allow')
+  expect(ran).toBe(false)
+})
+
+codemodeTest('cwd() hands the program the session\'s working directory', async ($, on) => {
+  on('session.cwd', async () => ({ value: '/work/repo' }))
+
+  const answer = await run($, 'return cwd()')
+
+  expect(answer.result).toBe('/work/repo')
+})

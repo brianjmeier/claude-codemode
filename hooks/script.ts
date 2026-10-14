@@ -3,11 +3,22 @@ import type { NestedCall, Run } from '../types'
 
 type ToolAnswer = { text: string; result: unknown; isError: boolean }
 
-export type HostAnswer = { kind: 'denied'; reason: string } | ({ kind: 'answered' } & ToolAnswer)
+export type HostAnswer =
+  | { kind: 'denied'; reason: string }
+  | { kind: 'started'; agentId: string }
+  | ({ kind: 'answered' } & ToolAnswer)
+
+export type AgentAsk = { type: string; prompt: string }
+
+export type ModelAsk = { model: string; prompt: string }
 
 export type ToolHost = {
   call: (tool: string, args: Record<string, unknown>) => Promise<HostAnswer>
+  agent: (ask: AgentAsk) => Promise<HostAnswer>
+  ask: (ask: ModelAsk) => Promise<HostAnswer>
   list: () => Promise<readonly { name: string; description: string }[]>
+  check: (tool: string, args: Record<string, unknown>) => Promise<'allow' | 'ask' | 'deny'>
+  cwd: () => Promise<string>
   now: () => Promise<number>
   publish: (run: Run) => Promise<void>
 }
@@ -25,10 +36,11 @@ export class ToolDenied extends Error {
 const SUMMARY_KEYS = ['command', 'file_path', 'pattern', 'path', 'url', 'query', 'description']
 const SUMMARY_LENGTH = 120
 
+const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, SUMMARY_LENGTH)
+
 const summaryOf = (args: Record<string, unknown>): string => {
   const key = SUMMARY_KEYS.find(name => typeof args[name] === 'string')
-  const text = key === undefined ? JSON.stringify(args) : String(args[key])
-  return text.replace(/\s+/g, ' ').trim().slice(0, SUMMARY_LENGTH)
+  return oneLine(key === undefined ? JSON.stringify(args) : String(args[key]))
 }
 
 const describe = (value: unknown): string =>
@@ -65,19 +77,36 @@ export async function runScript(code: string, host: ToolHost): Promise<Run> {
   const settle = (index: number, call: NestedCall) =>
     change({ ...run, calls: run.calls.map((one, i) => (i === index ? call : one)) })
 
-  const tool = async (name: string, args: Record<string, unknown>) => {
-    const summary = summaryOf(args)
-    const index = run.calls.length
+  const record = async (name: string, summary: string, answerOf: () => Promise<HostAnswer>) => {
     const callStartedAt = await host.now()
+    const index = run.calls.length
     await change({ ...run, calls: [...run.calls, { tool: name, summary, status: 'running' }] })
-    const answer = await host.call(name, args)
+    const answer = await answerOf()
     if (answer.kind === 'denied') {
       await settle(index, { tool: name, summary, status: 'denied' })
       throw new ToolDenied(name, answer.reason)
     }
+    if (answer.kind === 'started') {
+      await settle(index, { tool: name, summary, status: 'started' })
+      return answer
+    }
     const ms = (await host.now()) - callStartedAt
     await settle(index, { tool: name, summary, status: answer.isError ? 'failed' : 'done', ms })
-    return { text: answer.text, result: answer.result, isError: answer.isError }
+    return answer
+  }
+
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const answer = await record(name, summaryOf(args), () => host.call(name, args))
+    return answer.kind === 'answered' ? { text: answer.text, result: answer.result, isError: answer.isError } : answer
+  }
+  const agent = async (ask: AgentAsk) => {
+    const answer = await record(ask.type, oneLine(ask.prompt), () => host.agent(ask))
+    return answer.kind === 'started' ? { agentId: answer.agentId } : answer
+  }
+  const ask = async (question: ModelAsk) => {
+    const answer = await record(`ask ${question.model}`, oneLine(question.prompt), () => host.ask(question))
+    if (answer.kind === 'answered' && answer.isError) throw new Error(`ask ${question.model} failed: ${answer.text}`)
+    return answer.kind === 'answered' ? answer.text : ''
   }
   const tools = new Proxy(
     {},
@@ -88,7 +117,11 @@ export async function runScript(code: string, host: ToolHost): Promise<Run> {
   interpreter.import({
     tool,
     tools,
+    agent,
+    ask,
     listTools: host.list,
+    canCall: host.check,
+    cwd: host.cwd,
     log: (...parts: unknown[]) => void change({ ...run, logs: [...run.logs, parts.map(describe).join(' ')] }),
     ToolDenied,
   })

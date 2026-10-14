@@ -1,5 +1,5 @@
 export type NestedCall =
-  | { tool: string; summary: string; status: 'running' | 'denied' }
+  | { tool: string; summary: string; status: 'running' | 'denied' | 'started' }
   | { tool: string; summary: string; status: 'done' | 'failed'; ms: number }
 
 export type Outcome = { kind: 'running' } | { kind: 'returned'; text: string } | { kind: 'failed'; reason: string }

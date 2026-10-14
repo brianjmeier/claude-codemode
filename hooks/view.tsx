@@ -8,6 +8,7 @@ const MARK = {
   running: { glyph: '…', color: 'inactive' },
   done: { glyph: '✓', color: 'success' },
   failed: { glyph: '✗', color: 'error' },
+  started: { glyph: '↗', color: 'suggestion' },
 } as const
 
 const DOT = { running: 'inactive', returned: 'success', failed: 'error' } as const
@@ -30,6 +31,7 @@ const markOf = (call: NestedCall) => (call.status === 'denied' ? MARK.failed : M
 
 const settledAs = (call: NestedCall): string => {
   if (call.status === 'done' || call.status === 'failed') return ` ${duration(call.ms)}`
+  if (call.status === 'started') return ' started, reports to Claude'
   return call.status === 'denied' ? ' denied' : ''
 }
 
