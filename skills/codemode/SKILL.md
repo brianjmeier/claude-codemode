@@ -18,6 +18,7 @@ Use it when **the work is a loop or a filter over tool results**:
 - a search followed by a read of each hit, keeping only what matches
 - aggregation: sizes, counts, tables, the five worst offenders
 - a chain where call N+1 is decided by call N's result, and every step is mechanical
+- several independent calls you would otherwise make one per turn (an MCP read, a file and a `git status`): run them together with `Promise.all` and return only what the next step needs
 
 Call tools directly instead when:
 
