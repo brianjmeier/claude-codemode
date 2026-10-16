@@ -59,8 +59,10 @@ const outcomeOf = (props: RenderInput<'ToolUse'>['props'], run: Run): Outcome =>
 
 export type Program = { kind: 'typing' | 'written'; code: string }
 
-export function drawRun($: EngineInterface, e: RenderInput<'ToolUse'>, source: Program, run: Run) {
-  const { Box, Text, Code } = $.ui.resolve(e)
+export type Ui = ReturnType<EngineInterface['ui']['resolve']>
+
+export function drawRun(ui: Ui, e: RenderInput<'ToolUse'>, source: Program, run: Run) {
+  const { Box, Text, Code } = ui
   const outcome = outcomeOf(e.props, run)
   const isTyping = source.kind === 'typing'
   const program = isTyping ? tail(source.code, CODE_LINES) : head(source.code.trim(), CODE_LINES)

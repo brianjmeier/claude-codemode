@@ -116,7 +116,7 @@ export const register: Register = on => {
     const { code } = e.props.input as Partial<{ code: string }>
     const program: Program =
       code === undefined ? { kind: 'typing', code: await read($, memberOf(typed, e)) } : { kind: 'written', code }
-    return drawRun($, e, program, await read($, memberOf(runs, e)))
+    return drawRun($.ui.resolve(e), e, program, await read($, memberOf(runs, e)))
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
