@@ -23,6 +23,8 @@ export type ToolHost = {
   publish: (run: Run) => Promise<void>
 }
 
+export const SAVED_CODE_TOOL = 'mcp__tend__code_get'
+
 export class ToolDenied extends Error {
   constructor(
     readonly tool: string,
@@ -115,9 +117,22 @@ export async function runScript(code: string, host: ToolHost): Promise<Run> {
   )
 
   const interpreter = new Sval({ ecmaVer: 'latest', sandBox: true })
+  const exported = interpreter.exports as Record<string, unknown>
+  let savedRuns = 0
+  const saved = async (name: string, args: unknown) => {
+    const answer = (await tool(SAVED_CODE_TOOL, { name })) as ToolAnswer
+    if (answer.isError) throw new Error(`saved code "${name}" could not be read: ${answer.text}`)
+    const { source } = JSON.parse(answer.text) as { source: string }
+    const slot = `saved${savedRuns++}`
+    interpreter.run(`exports.${slot} = (\n${source}\n)`)
+    const program = exported[slot] as (tools: unknown, args: unknown) => unknown
+    delete exported[slot]
+    return program(tools, args)
+  }
   interpreter.import({
     tool,
     tools,
+    saved,
     agent,
     ask,
     listTools: host.list,

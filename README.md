@@ -30,6 +30,7 @@ Or for one session: `claude --plugin-dir <this folder>`.
 | `await agent({ type, prompt })` | Starts a real subagent (`Explore`, `Plan`, a plugin's agent) and resolves `{ agentId }` at once. Its answer reaches Claude as a normal subagent hand-back, not the program. | `↗ Explore … started, reports to Claude` |
 | `await canCall(name, args)` | What the permission check would decide (`"allow"`, `"ask"`, `"deny"`) without running anything. | |
 | `await cwd()` | The session's working directory, for absolute paths. | |
+| `await saved(name, args)` | Runs code this session saved in Tend: reads the record through `mcp__tend__code_get`, interprets its source (`async (tools, args) => …`) in the same sandbox with the program's own `tools`, and resolves what it returns. Each call it makes is a real tool call. A record Tend will not hand over throws, with Tend's words. | `✓ mcp__tend__code_get`, then a line per call |
 | `await listTools()` | `[{ name, description }]` of everything callable. | |
 | `log(...values)` | A line in the output Claude reads. | |
 | `ToolDenied` | What a refused call or spawn throws (`error.tool`, `error.reason`). | `✗ Bash jj log denied` |

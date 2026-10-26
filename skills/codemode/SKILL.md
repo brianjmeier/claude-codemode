@@ -30,7 +30,7 @@ Call tools directly instead when:
 ## The program
 
 The tool's own description lists what the program has (`tool`, `tools.Name`,
-`listTools`, `log`, `ToolDenied`) and what each call resolves to. Two choices
+`saved`, `listTools`, `log`, `ToolDenied`) and what each call resolves to. Two choices
 it leaves to you:
 
 - A tool that fails resolves with `isError: true`; a permission refusal
@@ -49,6 +49,14 @@ it leaves to you:
 - Before a loop of calls that might prompt the person, `canCall(name, args)`
   says `allow`, `ask` or `deny` without running anything; skip or batch rather
   than stack up dialogs. `cwd()` gives the working directory for absolute paths.
+
+## Saved code in Tend
+
+In a Tend session, code saved with `code.save` (a source such as
+`async (tools, args) => { … }`) runs again by name: `await saved(name, args)`
+reads it through `mcp__tend__code_get` and calls it with this program's
+`tools` and the new `args`. It is interpreted like the program itself, so it
+has no `eval` either and every call it makes meets the permission check.
 
 ## Patterns
 

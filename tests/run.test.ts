@@ -321,3 +321,60 @@ codemodeTest('template literals process their escapes as JavaScript does', async
 
   expect(ran.result).toBe(JSON.stringify(['a\nb', "grep '^readme\\.md$'", 'd\td', 'a\\nb']))
 })
+
+const savedCodeAnswer = (source: string) => ({
+  text: JSON.stringify({ name: 'count-todos', kind: 'program', source, sha256: 'x', revision: 1, savedBy: { session: 's', callsign: 'c' }, savedAt: '2026-10-26T00:00:00Z' }),
+  result: [],
+})
+
+codemodeTest('saved(name, args) reads the code through Tend and runs it with the program\'s own tools and the new arguments', async ($, on) => {
+  const asked: string[] = []
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async (_, e) => {
+    asked.push(String((e as unknown as { name: string }).name))
+    return savedCodeAnswer('async (tools, args) => { const { result } = await tools.Read({ file_path: args.file }); return args.file + ": " + result.split("TODO").length }') as never
+  })
+  on('tool.call', { tool: 'Read' }, async (_, e) => ({ result: `${e.file_path} TODO a TODO b` }))
+
+  const ran = await run($, 'return [await saved("count-todos", { file: "a.md" }), await saved("count-todos", { file: "b.md" })]')
+
+  expect(asked).toEqual(['count-todos', 'count-todos'])
+  expect(ran.result).toBe('["a.md: 3","b.md: 3"]\n\ntool calls: mcp__tend__code_get ×2, Read ×2')
+})
+
+codemodeTest('each call saved code makes meets the permission check, and a refusal throws ToolDenied', async ($, on) => {
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async () =>
+    savedCodeAnswer('async (tools, args) => { await tools.Read({ file_path: args.file }); return "read" }') as never,
+  )
+  on('classic.PreToolUse', async (_, e) => {
+    const { file_path } = e as unknown as { file_path?: string }
+    return file_path === '.env' ? { deny: 'secrets stay out' } : {}
+  })
+  on('tool.call', { tool: 'Read' }, async () => ({ result: 'ok' }))
+
+  const ran = await run($, `
+    try { await saved("count-todos", { file: ".env" }) }
+    catch (error) { return error instanceof ToolDenied ? error.tool + ": " + error.reason : "other" }
+  `)
+
+  expect(ran.result).toBe('Read: secrets stay out\n\ntool calls: mcp__tend__code_get, Read')
+})
+
+codemodeTest('saved code reaches no eval, like any program', async ($, on) => {
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async () =>
+    savedCodeAnswer('async () => { try { return eval("1") } catch (error) { return error.name } }') as never,
+  )
+
+  const ran = await run($, 'return saved("count-todos", {})')
+
+  expect(ran.result).toBe('EvalError\n\ntool calls: mcp__tend__code_get')
+})
+
+codemodeTest('saved() fails with Tend\'s words when Tend refuses to hand the code over', async ($, on) => {
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async () =>
+    ({ isError: true, text: 'Your session has no saved code "gone". code.list names what it keeps.', result: [] }) as never,
+  )
+
+  const ran = await run($, 'try { await saved("gone", {}) } catch (error) { return error.message }')
+
+  expect(ran.result).toBe('saved code "gone" could not be read: Your session has no saved code "gone". code.list names what it keeps.\n\ntool calls: mcp__tend__code_get')
+})
