@@ -322,8 +322,8 @@ codemodeTest('template literals process their escapes as JavaScript does', async
   expect(ran.result).toBe(JSON.stringify(['a\nb', "grep '^readme\\.md$'", 'd\td', 'a\\nb']))
 })
 
-const savedCodeAnswer = (source: string) => ({
-  text: JSON.stringify({ name: 'count-todos', kind: 'program', source, sha256: 'x', revision: 1, savedBy: { session: 's', callsign: 'c' }, savedAt: '2026-10-26T00:00:00Z' }),
+const savedCodeAnswer = (source: string, kind = 'program') => ({
+  text: JSON.stringify({ name: 'count-todos', kind, source, sha256: 'x', revision: 1, savedBy: { session: 's', callsign: 'c' }, savedAt: '2026-10-26T00:00:00Z' }),
   result: [],
 })
 
@@ -331,7 +331,7 @@ codemodeTest('saved(name, args) reads the code through Tend and runs it with the
   const asked: string[] = []
   on('tool.call', { tool: /^mcp__tend__code_get$/ }, async (_, e) => {
     asked.push(String((e as unknown as { name: string }).name))
-    return savedCodeAnswer('async (tools, args) => { const { result } = await tools.Read({ file_path: args.file }); return args.file + ": " + result.split("TODO").length }') as never
+    return savedCodeAnswer('async (tools, args) => { const read = await tools.Read({ file_path: args.file }); return args.file + ": " + read.structuredContent.split("TODO").length }') as never
   })
   on('tool.call', { tool: 'Read' }, async (_, e) => ({ result: `${e.file_path} TODO a TODO b` }))
 
@@ -377,4 +377,53 @@ codemodeTest('saved() fails with Tend\'s words when Tend refuses to hand the cod
   const ran = await run($, 'try { await saved("gone", {}) } catch (error) { return error.message }')
 
   expect(ran.result).toBe('saved code "gone" could not be read: Your session has no saved code "gone". code.list names what it keeps.\n\ntool calls: mcp__tend__code_get')
+})
+
+codemodeTest('saved code reads Tend answers in Pi codemode\'s shape, so one source runs in both programs', async ($, on) => {
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async () =>
+    savedCodeAnswer('async (tools, args) => { const read = await tools.mcp__tend__board_read({}); return args.file + ": " + read.structuredContent.revision }') as never,
+  )
+  on('tool.call', { tool: /^mcp__tend__board_read$/ }, async () => ({ text: '{"revision":7}', result: [] }) as never)
+
+  const ran = await run($, 'return saved("count-todos", { file: "a.md" })')
+
+  expect(ran.result).toBe('a.md: 7\n\ntool calls: mcp__tend__code_get, mcp__tend__board_read')
+})
+
+codemodeTest('saved code finds a Tend refusal\'s words in structuredContent.refused, as in Pi', async ($, on) => {
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async () =>
+    savedCodeAnswer('async tools => { const read = await tools.mcp__tend__board_read({}); return [read.isError, read.structuredContent.refused, read.content[0].text] }') as never,
+  )
+  on('tool.call', { tool: /^mcp__tend__board_read$/ }, async () => ({ isError: true, text: 'This board is unavailable.', result: [] }) as never)
+
+  const ran = await run($, 'return saved("count-todos", {})')
+
+  expect(ran.result).toBe('[true,"This board is unavailable.","This board is unavailable."]\n\ntool calls: mcp__tend__code_get, mcp__tend__board_read')
+})
+
+const savedFailure = async ($: Engine, on: On, answer: unknown) => {
+  on('tool.call', { tool: /^mcp__tend__code_get$/ }, async () => answer as never)
+  return (await run($, 'try { await saved("count-todos", {}) } catch (error) { return error.message }')).result
+}
+
+codemodeTest('saved() refuses a record that is not a program, naming its kind', async ($, on) => {
+  expect(await savedFailure($, on, savedCodeAnswer('(data) => "<p>" + data + "</p>"', 'render'))).toBe(
+    'saved code "count-todos" is a render, not a program\n\ntool calls: mcp__tend__code_get',
+  )
+})
+
+codemodeTest('saved() names the record whose source does not parse', async ($, on) => {
+  expect(await savedFailure($, on, savedCodeAnswer('async (tools, args) => {'))).toStartWith(
+    'saved code "count-todos" could not be run: ',
+  )
+})
+
+codemodeTest('saved() names the record whose answer is not a record', async ($, on) => {
+  expect(await savedFailure($, on, { text: 'not json', result: [] })).toStartWith('saved code "count-todos" could not be run: ')
+})
+
+codemodeTest('saved() names the record whose source is not a function', async ($, on) => {
+  expect(await savedFailure($, on, savedCodeAnswer('42'))).toBe(
+    'saved code "count-todos" is not a function (async (tools, args) => …)\n\ntool calls: mcp__tend__code_get',
+  )
 })

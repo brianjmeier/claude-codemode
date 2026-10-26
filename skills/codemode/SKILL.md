@@ -54,8 +54,10 @@ it leaves to you:
 
 In a Tend session, code saved with `code.save` (a source such as
 `async (tools, args) => { … }`) runs again by name: `await saved(name, args)`
-reads it through `mcp__tend__code_get` and calls it with this program's
-`tools` and the new `args`. It is interpreted like the program itself, so it
+reads it through `mcp__tend__code_get` and calls it with the new `args` and
+`tools` that resolve in Pi codemode's shape, `{ content, structuredContent,
+isError }`, so the same source runs in Pi. Only records of kind `program`
+run. It is interpreted like the program itself, so it
 has no `eval` either and every call it makes meets the permission check.
 
 ## Patterns

@@ -69,6 +69,39 @@ export const report = (run: Run): string =>
     .filter(part => part !== '')
     .join('\n\n')
 
+type SavedRecord = { kind: string; source: string }
+
+const couldNotRun = (name: string, error: unknown): Error =>
+  new Error(`saved code "${name}" could not be run: ${error instanceof Error ? error.message : describe(error)}`)
+
+const parsedRecord = (name: string, text: string): SavedRecord => {
+  try {
+    return JSON.parse(text) as SavedRecord
+  } catch (error) {
+    throw couldNotRun(name, error)
+  }
+}
+
+const parsedOrUndefined = (text: string): unknown => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+const structuredOf = (name: string, answer: ToolAnswer): unknown => {
+  if (!name.startsWith('mcp__')) return answer.result
+  if (answer.isError) return { refused: answer.text }
+  return parsedOrUndefined(answer.text)
+}
+
+const piShaped = (name: string, answer: ToolAnswer) => ({
+  content: [{ type: 'text', text: answer.text }],
+  structuredContent: structuredOf(name, answer),
+  isError: answer.isError,
+})
+
 export async function runScript(code: string, host: ToolHost): Promise<Run> {
   const startedAt = await host.now()
   const root = await host.cwd()
@@ -118,16 +151,32 @@ export async function runScript(code: string, host: ToolHost): Promise<Run> {
 
   const interpreter = new Sval({ ecmaVer: 'latest', sandBox: true })
   const exported = interpreter.exports as Record<string, unknown>
+  const savedTools = new Proxy(
+    {},
+    {
+      get: (_, name) => async (args: Record<string, unknown>) =>
+        piShaped(String(name), (await tool(String(name), args)) as ToolAnswer),
+    },
+  )
+  const compiled = (name: string, text: string, slot: string) => {
+    const record = parsedRecord(name, text)
+    if (record.kind !== 'program') throw new Error(`saved code "${name}" is a ${record.kind}, not a program`)
+    try {
+      interpreter.run(`exports.${slot} = (\n${record.source}\n)`)
+    } catch (error) {
+      throw couldNotRun(name, error)
+    }
+    const program = exported[slot]
+    delete exported[slot]
+    if (typeof program !== 'function') throw new Error(`saved code "${name}" is not a function (async (tools, args) => …)`)
+    return program as (tools: unknown, args: unknown) => unknown
+  }
   let savedRuns = 0
   const saved = async (name: string, args: unknown) => {
     const answer = (await tool(SAVED_CODE_TOOL, { name })) as ToolAnswer
     if (answer.isError) throw new Error(`saved code "${name}" could not be read: ${answer.text}`)
-    const { source } = JSON.parse(answer.text) as { source: string }
-    const slot = `saved${savedRuns++}`
-    interpreter.run(`exports.${slot} = (\n${source}\n)`)
-    const program = exported[slot] as (tools: unknown, args: unknown) => unknown
-    delete exported[slot]
-    return program(tools, args)
+    const program = compiled(name, answer.text, `saved${savedRuns++}`)
+    return program(savedTools, args)
   }
   interpreter.import({
     tool,

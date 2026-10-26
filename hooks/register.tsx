@@ -24,7 +24,7 @@ The program is the body of an async function:
 - A call the permission check refuses throws \`ToolDenied\` (\`e.tool\`, \`e.reason\`).
 - \`await ask({ model: "haiku", prompt: "..." })\` asks a model one question with no tools and resolves its answer as text; hand it the text it needs. Several can run at once with \`Promise.all\`. Start each prompt with what differs (\`prs: summarize…\`): the person sees the first words of every call.
 - \`await agent({ type: "Explore", prompt: "..." })\` starts a subagent and resolves \`{ agentId }\` at once; its answer reaches you as a normal subagent hand-back, not the program.
-- \`await saved(name, args)\` runs code this session saved in Tend: it reads the record through \`mcp__tend__code_get\`, calls its source (\`async (tools, args) => …\`) with this program's \`tools\` and the given \`args\`, and resolves what it returns. Each call it makes meets the permission check like any other.
+- \`await saved(name, args)\` runs code this session saved in Tend: it reads the record through \`mcp__tend__code_get\`, calls its source (\`async (tools, args) => …\`) with the given \`args\` and tools whose calls resolve in Pi codemode's shape, \`{ content, structuredContent, isError }\` (a Tend answer's JSON in \`structuredContent\`, a refusal's words in \`structuredContent.refused\`), so the same source runs in Pi. Only records of kind \`program\` run. Each call it makes meets the permission check like any other.
 - \`await listTools()\` returns \`[{ name, description }]\`.
 - \`await canCall(name, args)\` returns \`"allow"\`, \`"ask"\` or \`"deny"\`: what the permission check would decide, without running anything.
 - \`await cwd()\` returns the session's working directory, for absolute paths.
